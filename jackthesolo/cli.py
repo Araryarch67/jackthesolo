@@ -298,7 +298,7 @@ def _entry_url(e: dict) -> str | None:
 
 
 def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None, output_dir=None):
-    """Subsripper engine for one item. Returns files, None on failure."""
+    """TikTok engine for one item. Returns files, None on failure."""
     from .tiktok import download_tiktok, is_tiktok_detail_url
 
     if not (is_tiktok_detail_url(url) and not (args.info or args.list_formats)):
