@@ -1,6 +1,6 @@
 [project]
 name = "jackthesolo"
-version = "0.4.0"
+version = "0.4.1"
 description = "jackthesolo - downloader semua platform (video, musik, file, cloud-drive)"
 readme = "README.md"
 license = { text = "MIT" }
