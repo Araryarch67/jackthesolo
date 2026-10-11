@@ -122,3 +122,37 @@ class TestRetryHelpers:
             d1 = backoff_delay(1, base=2.0, cap=30.0)
             assert 1.0 <= d1 <= 2.0
             assert backoff_delay(99, base=2.0, cap=30.0) <= 30.0
+
+
+class TestAnsiGate:
+    def test_legacy_windows_off(self, monkeypatch):
+        import os
+        import sys
+
+        from jackthesolo.progress import Spinner, ansi_ok
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(sys, "stdout", Tty())
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.delenv("WT_SESSION", raising=False)
+        monkeypatch.delenv("TERM", raising=False)
+        assert ansi_ok() is False
+        assert Spinner().enabled is False
+
+    def test_windows_terminal_on(self, monkeypatch):
+        import os
+        import sys
+
+        from jackthesolo.progress import ansi_ok
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(sys, "stdout", Tty())
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setenv("WT_SESSION", "x")
+        assert ansi_ok() is True

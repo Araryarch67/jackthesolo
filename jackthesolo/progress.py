@@ -6,10 +6,19 @@ measurable ones. Silent when output is not a tty (logs/pipes stay clean).
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 
 FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+def ansi_ok() -> bool:
+    if not sys.stdout.isatty():
+        return False
+    if os.name == "nt" and not os.getenv("WT_SESSION") and not os.getenv("TERM"):
+        return False  # legacy Windows console cannot render ANSI escapes
+    return True
 
 
 def bar(done: int, total: int, width: int = 24) -> str:
@@ -70,7 +79,7 @@ class Rate:
 
 class Spinner:
     def __init__(self, enabled: bool | None = None) -> None:
-        self.enabled = sys.stdout.isatty() if enabled is None else enabled
+        self.enabled = ansi_ok() if enabled is None else enabled
         self._msg = ""
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -124,7 +133,7 @@ class BatchView:
     def __init__(self, enabled: bool | None = None) -> None:
         import shutil
 
-        self.enabled = sys.stdout.isatty() if enabled is None else enabled
+        self.enabled = ansi_ok() if enabled is None else enabled
         self.rows: list[str] = []
         self._drawn = 0
         try:
@@ -161,7 +170,12 @@ class BatchView:
 
 
 def is_transient_http(status: int | None) -> bool:
-    return status is None or status == 408 or status == 429 or (status is not None and 500 <= status <= 599)
+    return (
+        status is None
+        or status == 408
+        or status == 429
+        or (status is not None and 500 <= status <= 599)
+    )
 
 
 def backoff_delay(attempt: int, base: float = 2.0, cap: float = 30.0) -> float:

@@ -34,7 +34,9 @@ RESET = "\033[0m"
 
 
 def print_banner() -> None:
-    use_color = sys.stdout.isatty()
+    from .progress import ansi_ok
+
+    use_color = ansi_ok()
     art = BANNER.strip("\n")
     if use_color:
         print(f"{GREEN}{art}{RESET}")
