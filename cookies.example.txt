@@ -1,0 +1,4 @@
+# Netscape HTTP Cookie File
+# CONTOH SAJA — export cookies MILIKMU via extension 'Get cookies.txt LOCALLY',
+# lalu pakai: jackthesolo "URL" --cookies cookies.txt
+# Jangan pernah commit/share cookies asli.

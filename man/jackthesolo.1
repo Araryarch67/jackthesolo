@@ -1,0 +1,166 @@
+.TH JACKTHESOLO 1 "October 2026" "jackthesolo 0.1.0" "User Commands"
+.SH NAME
+jackthesolo \- download hampir apa saja: media, file langsung, cloud-drive
+.SH SYNOPSIS
+.B jackthesolo
+.RI [ OPTIONS ] " URL"
+.br
+.B jackthesolo --check
+.br
+.B jackthesolo --help
+.SH DESCRIPTION
+.B jackthesolo
+adalah downloader multi-sumber dengan auto-detect URL:
+link preview/share cloud-drive \(-> mode cloud (tiru tab Network),
+.IR .pdf /.zip /...
+\(-> mode file langsung, sisanya \(-> yt-dlp (teruji YouTube dan TikTok;
+situs lain best-effort, belum dites satu-satu).
+.PP
+Privasi aktif secara default: User-Agent acak tiap jalan,
+Tor sebagai rute wajib (fail-closed), circuit terisolasi per download,
+token sensitif disensor di log.
+.SH MODES
+Auto-detect berjalan bila flag mode tidak diberikan:
+.TP
+.B cloud
+Link preview/share cloud-drive (cth. SharePoint/OneDrive).
+Membuka halaman preview via browser headless (Playwright)
+dan menyadap stream file dari Network. Wajib
+.BR --cookies .
+.TP
+.B direct
+Path URL berakhiran ekstensi file (.pdf .zip .rar .mp4 ...).
+Download via HTTP langsung, cookies opsional.
+.TP
+.B scribd
+Dokumen scribd.com menjadi PDF via embed tanpa login.
+.TP
+.B media
+.br
+Semua URL lain via yt-dlp: pilih resolusi, audio-only MP3, playlist,
+serta intip metadata via
+.B --info
+dan
+.BR --list-formats .
+URL TikTok /video|photo/<id> plus
+.B --cookies
+memakai mesin TikTok (TLS impersonate, video + foto termasuk subs-only),
+jatuh kembali ke yt-dlp bila gagal.
+.SH OPTIONS
+.TP
+.BR -o ", " --output " \fIDIR\fR"
+Folder output (default:
+.IR ~/Downloads ).
+.TP
+.BR -a ", " --audio-only
+Audio saja (MP3, mode media).
+.TP
+.BR -q ", " --quality " \fIQ\fR"
+Kualitas mode media: best, 1080, 720, 480, 360 (default: best).
+.TP
+.B --allow-playlist
+Izinkan full playlist (default: satu video).
+.TP
+.BR --max " \fIN\fR"
+Batas jumlah item batch profil/playlist. URL profil TikTok otomatis
+jadi mode batch.
+.TP
+.BR --cookies " \fIFILE\fR"
+Path cookies.txt Netscape MILIKMU (wajib untuk konten login).
+Tidak ada lokasi default; tiap user export sendiri.
+.TP
+.BR --proxy " \fIURL\fR"
+Proxy http/https/socks5, cth socks5h://127.0.0.1:9050.
+.TP
+.B --tor
+Paksa lewat Tor (butuh Tor jalan di 127.0.0.1:9050).
+.TP
+.B --no-proxy
+Paksa koneksi langsung (untuk konten login).
+.TP
+.B --no-random-ua
+Matikan UA acak.
+.TP
+.BR --user-agent " \fIS\fR"
+User-Agent manual.
+.TP
+.B --cloud
+Paksa mode preview cloud-drive.
+.TP
+.B --scribd
+Paksa mode dokumen scribd.
+.TP
+.BR --wait " \fIN\fR"
+Detik tunggu preview ke-load (default: 25).
+.TP
+.B --direct
+Paksa mode file langsung.
+.TP
+.BR --output-file " \fINAME\fR"
+Nama file output.
+.TP
+.B --info
+Tampilkan judul/uploader/durasi (mode media).
+.TP
+.B --list-formats
+Tampilkan format tersedia (mode media).
+.TP
+.BR -v ", " --verbose
+Verbose (detail error tetap disensor).
+.TP
+.B --paranoid
+Fail-closed: wajib bukti egress anonim + tolak cookies/login.
+.TP
+.BR --url-file " \fIFILE\fR"
+Baca URL dari file agar token tidak nyangkut di shell history.
+.TP
+.B --no-banner
+Sembunyikan banner ASCII.
+.TP
+.B --check
+Cek ffmpeg, yt-dlp, proxy, playwright.
+.SH COOKIES
+Program tidak membawa cookies siapa pun. Untuk konten login:
+.RS
+.nf
+# 1. Buka situsnya di Chrome (login akunmu)
+# 2. Export via extension "Get cookies.txt LOCALLY"
+# 3. Pakai:
+jackthesolo "URL" --cookies cookies.txt
+chmod 600 cookies.txt
+.fi
+.RE
+.SH PRIVACY
+UA acak ON; Tor (127.0.0.1:9050) rute default dan wajib untuk download
+publik; circuit fresh terisolasi per download; DNS lewat Tor.
+Download dengan cookies akunmu = server tahu siapa kamu.
+.SH EXAMPLES
+.RS
+.nf
+jackthesolo "URL"
+jackthesolo "https://.../shared?..." \\
+    --cookies cookies.txt --output-file Dokumen.pdf
+jackthesolo "https://www.tiktok.com/@u/video/123" --audio-only
+jackthesolo "https://example.com/data.zip"
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/Downloads
+Folder output default.
+.TP
+.I cookies.example.txt
+Contoh format cookies (bukan cookies asli).
+.SH EXIT STATUS
+.TP
+.B 0
+Sukses.
+.TP
+.B 1
+Download gagal.
+.TP
+.B 2
+Argumen/cookies kurang (lihat pesan).
+.SH SEE ALSO
+.BR yt-dlp (1),
+.BR tor (1)

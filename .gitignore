@@ -1,0 +1,45 @@
+# ===== Rahasia & data pribadi (JANGAN commit) =====
+*cookies*
+!cookies.example.txt
+*.cookies
+.env
+.env.*
+*.pem
+*.key
+*secret*
+*credential*
+*token*.txt
+url*.txt
+
+# ===== Hasil download & sementara =====
+downloads/
+*.pdf
+*.mp4
+*.mp3
+*.part
+*.log
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ===== OS & editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

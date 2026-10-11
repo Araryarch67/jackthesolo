@@ -1,0 +1,6 @@
+yt-dlp>=2024.1.1
+requests>=2.31
+PySocks>=1.7  # untuk --proxy socks5 / --tor
+playwright>=1.40  # untuk mode cloud
+curl-cffi>=0.11  # TLS impersonate untuk TikTok ala subsripper
+pypdf>=4  # gabung halaman PDF untuk mode scribd

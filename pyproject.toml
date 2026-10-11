@@ -1,0 +1,33 @@
+[project]
+name = "jackthesolo"
+version = "0.3.0"
+description = "jackthesolo - downloader semua platform (video, musik, file, cloud-drive)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["downloader", "youtube", "tiktok", "tor", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = ["yt-dlp>=2024.1.1", "requests>=2.31", "PySocks>=1.7", "playwright>=1.40", "curl-cffi>=0.11", "pypdf>=4"]
+
+[project.urls]
+Homepage = "https://github.com/Araryarch67/jackthesolo"
+Repository = "https://github.com/Araryarch67/jackthesolo"
+
+[project.scripts]
+jackthesolo = "jackthesolo.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jackthesolo*"]
