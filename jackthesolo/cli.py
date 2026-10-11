@@ -268,6 +268,14 @@ def run_wizard(default_url: str | None = None) -> int:
     return main(argv)
 
 
+def _batch_username(url: str) -> str:
+    import re
+
+    m = re.search(r"tiktok\.com/@([\w.-]+)", url)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", m.group(1)) if m else "batch"
+    return name or "batch"
+
+
 def _flat_entries(dl, url: str) -> list:
     """Fast ID-level enumeration for batch mode (flat, no per-item fetch)."""
     import yt_dlp
@@ -283,7 +291,7 @@ def _entry_url(e: dict) -> str | None:
     return u if u.startswith("http") else None
 
 
-def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None):
+def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None, output_dir=None):
     """Subsripper engine for one item. Returns files, None on failure."""
     from .tiktok import download_tiktok, is_tiktok_detail_url
 
@@ -294,7 +302,7 @@ def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None):
         return download_tiktok(
             url,
             cookies_file=cookies,
-            output_dir=args.output,
+            output_dir=output_dir or args.output,
             output_file=output_file,
             proxy=eff,
             user_agent=args.user_agent,
@@ -312,21 +320,34 @@ def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None):
 
 
 def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
-    """Streaming batch: list items one by one, download each via best engine."""
+    """Batch into username/ folder: preview list first, confirm, then download."""
+    from .progress import BatchView, Spinner
+
+    user = _batch_username(url)
+    out_dir = Path(args.output) / user
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[jackthesolo] batch folder: {out_dir}/")
+
+    spin = Spinner().start("listing items...")
     try:
         entries = _flat_entries(dl, url)
     except Exception as e:  # noqa: BLE001
+        spin.stop()
         print(
             f"[jackthesolo] batch list failed ({type(e).__name__}), aborting.",
             file=sys.stderr,
         )
         return 1
+    spin.stop()
     if args.max:
         entries = entries[: args.max]
     print(
-        f"[jackthesolo] batch: {len(entries)} item(s)"
+        f"[jackthesolo] preview: {len(entries)} item(s)"
         + (" (dry run)" if args.dry_run else "")
     )
+    for i, e in enumerate(entries, 1):
+        title = e.get("title") or e.get("id") or "?"
+        print(f"  {i}. {title} ({e.get('id')})")
     if not args.dry_run and not args.yes and sys.stdin.isatty():
         try:
             ans = input(f"Continue to download {len(entries)} item(s)? [Y/n]: ")
@@ -336,8 +357,20 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
         if ans.strip().lower() in ("n", "no"):
             print("Cancelled.")
             return 2
-    from .progress import BatchView
 
+    batch_dl = JackDownloader(
+        output_dir=out_dir,
+        audio_only=args.audio_only,
+        quality=args.quality,
+        no_playlist=True,
+        cookies_file=cookies,
+        verbose=args.verbose,
+        proxy=args.proxy,
+        use_tor=args.tor,
+        no_proxy=args.no_proxy,
+        user_agent=args.user_agent,
+        random_ua=anon_ua,
+    )
     view = BatchView()
     files_all: list = []
     videos = photos = 0
@@ -348,7 +381,7 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
             continue
         if args.dry_run:
             try:
-                info = dl.get_info(item_url)
+                info = batch_dl.get_info(item_url)
             except Exception:  # noqa: BLE001
                 view.add(f"  {i}. [?] {item_url}")
                 continue
@@ -362,10 +395,12 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
             label = label[:67] + "..."
         idx = view.add(f"[{i}/{len(entries)}] {label} ... waiting")
         view.freeze()
-        got = _tiktok_single(args, item_url, cookies, anon_ua)
-        if got is None:
+        saved_here = _tiktok_single(
+            args, item_url, cookies, anon_ua, output_dir=out_dir
+        )
+        if saved_here is None:
             try:
-                got = dl.download(item_url, view=view, view_idx=idx)
+                saved_here = batch_dl.download(item_url, view=view, view_idx=idx)
             except Exception as e2:  # noqa: BLE001
                 view.freeze()
                 print(
@@ -375,15 +410,15 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
                 view.set(idx, f"[{i}/{len(entries)}] FAILED")
                 continue
         else:
-            view.set(idx, f"[{i}/{len(entries)}] done: {len(got)} file(s)")
-        files_all += got or []
+            view.set(idx, f"[{i}/{len(entries)}] done: {len(saved_here)} file(s)")
+        files_all += saved_here or []
     view.freeze()
     if args.dry_run:
         print(
             f"[jackthesolo] found {len(entries)} item(s): {videos} video, {photos} photo"
         )
     else:
-        print(f"[jackthesolo] total {len(files_all)} file(s) -> {args.output}/")
+        print(f"[jackthesolo] total {len(files_all)} file(s) -> {out_dir}/")
     return 0
 
 

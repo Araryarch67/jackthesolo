@@ -347,3 +347,39 @@ class TestBatchConfirm:
         ])
         assert rc == 0
         assert "total 1 file(s)" in capsys.readouterr().out
+
+
+class TestBatchFolder:
+    def test_username_clean(self):
+        from jackthesolo.cli import _batch_username
+
+        assert _batch_username("https://www.tiktok.com/@someuser") == "someuser"
+        assert _batch_username("https://www.tiktok.com/@we-ird.name_1") == "we-ird.name_1"
+        assert _batch_username("https://example.com/x") == "batch"
+
+    def test_preview_before_confirm_and_subfolder(self, monkeypatch, tmp_path, capsys):
+        import jackthesolo.cli as cli_mod
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                self.out = k.get("output_dir")
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        monkeypatch.setattr(
+            cli_mod, "_flat_entries",
+            lambda dl, url: [{"id": "9", "title": "hello", "url": "https://x/y"}],
+        )
+        monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: ["f.mp4"])
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--yes",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "batch folder:" in out and str(tmp_path / "u") in out
+        assert "  1. hello (9)" in out  # preview line
+        assert out.index("  1. hello (9)") < out.index("total 1 file(s)")
+        assert f"total 1 file(s) -> {tmp_path / 'u'}/" in out
