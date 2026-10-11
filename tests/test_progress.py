@@ -101,3 +101,24 @@ class TestBatchView:
         v.width = 20
         v.add("x" * 100)
         assert len(capsys.readouterr().out.strip()) <= 100
+
+
+class TestRetryHelpers:
+    def test_transient(self):
+        from jackthesolo.progress import backoff_delay, is_transient_http
+
+        assert is_transient_http(None) is True
+        assert is_transient_http(500) is True
+        assert is_transient_http(429) is True
+        assert is_transient_http(408) is True
+        assert is_transient_http(404) is False
+        assert is_transient_http(403) is False
+        assert is_transient_http(200) is False
+
+    def test_backoff_bounds(self):
+        from jackthesolo.progress import backoff_delay
+
+        for _ in range(50):
+            d1 = backoff_delay(1, base=2.0, cap=30.0)
+            assert 1.0 <= d1 <= 2.0
+            assert backoff_delay(99, base=2.0, cap=30.0) <= 30.0

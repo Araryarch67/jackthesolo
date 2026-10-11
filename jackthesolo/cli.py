@@ -69,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="max batch items (profile/playlist), e.g. --max 5",
     )
     p.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help="total attempts per download on transient errors (default: 3)",
+    )
+    p.add_argument(
         "-y",
         "--yes",
         action="store_true",
@@ -347,8 +353,22 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
         )
         return 1
     spin.stop()
+    seen_ids: set[str] = set()
+    unique_entries: list = []
+    dupes = 0
+    for e in entries:
+        eid = str(e.get("id") or "")
+        if eid and eid in seen_ids:
+            dupes += 1
+            continue
+        if eid:
+            seen_ids.add(eid)
+        unique_entries.append(e)
+    entries = unique_entries
     if args.max:
         entries = entries[: args.max]
+    if dupes:
+        print(f"[jackthesolo] skipped {dupes} duplicate listing(s)")
     print(
         f"[jackthesolo] preview: {len(entries)} item(s)"
         + (" (dry run)" if args.dry_run else "")
@@ -390,6 +410,13 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
     videos = photos = 0
     sized_bytes = 0
     sized_items = 0
+    skipped = 0
+
+    def _already_saved(eid: str | None) -> bool:
+        if not eid:
+            return False
+        return any(out_dir.glob(f"*{eid}*"))
+
     for i, e in enumerate(entries, 1):
         item_url = _entry_url(e)
         if not item_url:
@@ -411,27 +438,41 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
             extra = f" ~{fmt_bytes(best)}" if best else ""
             view.add(f"  {i}. [{kind}] {info.get('title')} ({info.get('id')}){extra}")
             continue
+        if _already_saved(e.get("id")):
+            skipped += 1
+            view.add(f"[{i}/{len(entries)}] already saved, skipped ({e.get('id')})")
+            continue
         label = sanitize_url(item_url)
         if len(label) > 70:
             label = label[:67] + "..."
         idx = view.add(f"[{i}/{len(entries)}] {label} ... waiting")
         view.freeze()
-        saved_here = _tiktok_single(
-            args, item_url, cookies, anon_ua, output_dir=out_dir
-        )
-        if saved_here is None:
-            try:
-                saved_here = batch_dl.download(item_url, view=view, view_idx=idx)
-            except Exception as e2:  # noqa: BLE001
+        saved_here = None
+        last_err: Exception | None = None
+        for att in range(1, max(1, args.retries) + 1):
+            saved_here = _tiktok_single(
+                args, item_url, cookies, anon_ua, output_dir=out_dir
+            )
+            if saved_here is None:
+                try:
+                    saved_here = batch_dl.download(item_url, view=view, view_idx=idx)
+                except Exception as e2:  # noqa: BLE001
+                    saved_here = None
+                    last_err = e2
+            if saved_here is not None:
+                break
+            if att < max(1, args.retries):
                 view.freeze()
-                print(
-                    f"  item failed ({type(e2).__name__}), continuing...",
-                    file=sys.stderr,
-                )
-                view.set(idx, f"[{i}/{len(entries)}] FAILED")
-                continue
-        else:
-            view.set(idx, f"[{i}/{len(entries)}] done: {len(saved_here)} file(s)")
+                print(f"  retry item ({att + 1}/{max(1, args.retries)})...")
+        if saved_here is None:
+            view.freeze()
+            print(
+                f"  item failed ({type(last_err).__name__ if last_err else 'no result'}), continuing...",
+                file=sys.stderr,
+            )
+            view.set(idx, f"[{i}/{len(entries)}] FAILED")
+            continue
+        view.set(idx, f"[{i}/{len(entries)}] done: {len(saved_here)} file(s)")
         files_all += saved_here or []
     view.freeze()
     if args.dry_run:
@@ -445,6 +486,10 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
             )
     else:
         print(f"[jackthesolo] total {len(files_all)} file(s) -> {out_dir}/")
+        if skipped:
+            print(
+                f"[jackthesolo] skipped {skipped} already-saved item(s), no duplicates"
+            )
     return 0
 
 
@@ -664,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
                 no_proxy=args.no_proxy,
                 user_agent=args.user_agent,
                 random_ua=anon_ua,
+                retries=args.retries,
             )
             print(f"[jackthesolo] saved: {dest}")
             return 0

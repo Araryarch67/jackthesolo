@@ -103,3 +103,129 @@ class TestDownloadFile:
             no_proxy=True,
         )
         assert not list(tmp_path.glob("*.part"))
+
+
+class TestRetryResume:
+    def test_transient_retried_then_ok(self, tmp_path, monkeypatch):
+        import requests
+
+        from jackthesolo import filedownloader as fd
+
+        calls = {"n": 0}
+
+        class Resp:
+            status_code = 200
+            headers = {"content-length": "3", "content-type": "text/plain"}
+
+            def raise_for_status(self):
+                pass
+
+            def iter_content(self, chunk_size=1):
+                yield b"abc"
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class S:
+            def get(self, *a, **k):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise requests.ConnectionError("boom")
+                return Resp()
+
+        monkeypatch.setattr(fd, "load_session_with_cookies", lambda *a, **k: S())
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        p = fd.download_file(
+            "http://x/f.bin", output_dir=tmp_path, output_file="f.bin",
+            no_proxy=True, retries=3,
+        )
+        assert p.read_bytes() == b"abc" and calls["n"] == 2
+
+    def test_fatal_not_retried(self, tmp_path, monkeypatch):
+        from jackthesolo import filedownloader as fd
+
+        calls = {"n": 0}
+
+        class Resp:
+            status_code = 404
+            headers = {"content-type": "text/plain"}
+
+            def raise_for_status(self):
+                import requests
+
+                raise requests.HTTPError(response=self)
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class S:
+            def get(self, *a, **k):
+                calls["n"] += 1
+                return Resp()
+
+        monkeypatch.setattr(fd, "load_session_with_cookies", lambda *a, **k: S())
+        import pytest as _pytest
+
+        with _pytest.raises(Exception):
+            fd.download_file(
+                "http://x/f.bin", output_dir=tmp_path, output_file="f.bin",
+                no_proxy=True, retries=3,
+            )
+        assert calls["n"] == 1
+
+    def test_resume_append(self, tmp_path, monkeypatch):
+        from jackthesolo import filedownloader as fd
+
+        seen = {}
+
+        class Resp:
+            status_code = 206
+            headers = {"content-range": "bytes 3-5/6", "content-type": "text/plain"}
+
+            def raise_for_status(self):
+                pass
+
+            def iter_content(self, chunk_size=1):
+                yield b"def"
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class S:
+            def get(self, url, headers=None, **k):
+                seen["range"] = (headers or {}).get("Range")
+                return Resp()
+
+        (tmp_path / "f.bin.part").write_bytes(b"abc")
+        monkeypatch.setattr(fd, "load_session_with_cookies", lambda *a, **k: S())
+        p = fd.download_file(
+            "http://x/f.bin", output_dir=tmp_path, output_file="f.bin",
+            no_proxy=True,
+        )
+        assert p.read_bytes() == b"abcdef"
+        assert seen["range"] == "bytes=3-"
+
+    def test_total_from_range(self):
+        from jackthesolo.filedownloader import _total_from_range
+
+        assert _total_from_range("bytes 3-5/6") == 6
+        assert _total_from_range(None) == 0
+        assert _total_from_range("garbage") == 0

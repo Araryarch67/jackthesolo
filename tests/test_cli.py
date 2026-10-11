@@ -474,3 +474,113 @@ class TestBatchFolder:
         assert "  1. hello (9)" in out  # preview line
         assert out.index("  1. hello (9)") < out.index("total 1 file(s)")
         assert f"total 1 file(s) -> {tmp_path / 'u'}/" in out
+
+
+class TestBatchDedupe:
+    def _run(self, monkeypatch, tmp_path, entries, **flags):
+        import jackthesolo.cli as cli_mod
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        monkeypatch.setattr(cli_mod, "_flat_entries", lambda dl, url: entries)
+        return cli_mod, flags
+
+    def test_duplicate_listings_deduped(self, monkeypatch, tmp_path, capsys):
+        cli_mod, _ = self._run(
+            monkeypatch, tmp_path,
+            [{"id": "1", "title": "a", "url": "https://x/1"},
+             {"id": "1", "title": "a", "url": "https://x/1"}],
+        )
+        monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: ["f.mp4"])
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--yes",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
+        assert "skipped 1 duplicate listing(s)" in capsys.readouterr().out
+
+    def test_saved_files_skipped(self, monkeypatch, tmp_path, capsys):
+        cli_mod, _ = self._run(
+            monkeypatch, tmp_path,
+            [{"id": "4242", "title": "a", "url": "https://x/4242"}],
+        )
+        (tmp_path / "u").mkdir()
+        (tmp_path / "u" / "4242.mp4").write_text("x")
+        monkeypatch.setattr(
+            cli_mod, "_tiktok_single",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not download")),
+        )
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--yes",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "already saved, skipped (4242)" in out
+        assert "skipped 1 already-saved item(s), no duplicates" in out
+
+
+class TestBatchRetry:
+    def test_item_retried_then_ok(self, monkeypatch, tmp_path, capsys):
+        import jackthesolo.cli as cli_mod
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+            def download(self, url, **k):
+                raise AssertionError("engine should win on retry")
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        monkeypatch.setattr(
+            cli_mod, "_flat_entries",
+            lambda dl, url: [{"id": "1", "url": "https://x/y"}],
+        )
+        calls = {"n": 0}
+
+        def fake_single(*a, **k):
+            calls["n"] += 1
+            return None if calls["n"] == 1 else ["f.mp4"]
+
+        monkeypatch.setattr(cli_mod, "_tiktok_single", fake_single)
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--yes",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "retry item (2/3)" in out and "total 1 file(s)" in out
+
+    def test_retries_one_no_repeat(self, monkeypatch, tmp_path):
+        import jackthesolo.cli as cli_mod
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+            def download(self, url, **k):
+                raise RuntimeError("down")
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        monkeypatch.setattr(
+            cli_mod, "_flat_entries",
+            lambda dl, url: [{"id": "1", "url": "https://x/y"}],
+        )
+        monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: None)
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--yes",
+            "-o", str(tmp_path), "--no-proxy", "--retries", "1",
+        ])
+        assert rc == 0

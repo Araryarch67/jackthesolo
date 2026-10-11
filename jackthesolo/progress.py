@@ -158,3 +158,15 @@ class BatchView:
     def freeze(self) -> None:
         """Forget cursor position; next set() redraws the block fresh."""
         self._drawn = 0
+
+
+def is_transient_http(status: int | None) -> bool:
+    return status is None or status == 408 or status == 429 or (status is not None and 500 <= status <= 599)
+
+
+def backoff_delay(attempt: int, base: float = 2.0, cap: float = 30.0) -> float:
+    """Exponential backoff with jitter. Attempt counts from 1."""
+    import random
+
+    delay = min(cap, base * (2.0 ** (attempt - 1)))
+    return delay / 2.0 + random.uniform(0, delay / 2.0)
