@@ -200,10 +200,13 @@ class TestBatchPreview:
     def test_dry_run_streams_items(self, monkeypatch, tmp_path, capsys):
         import jackthesolo.cli as cli_mod
 
-        self._flat_ydl(monkeypatch, [
-            {"id": "1", "url": "https://www.tiktok.com/@u/video/1"},
-            {"id": "2", "url": "https://www.tiktok.com/@u/video/2"},
-        ])
+        self._flat_ydl(
+            monkeypatch,
+            [
+                {"id": "1", "url": "https://www.tiktok.com/@u/video/1"},
+                {"id": "2", "url": "https://www.tiktok.com/@u/video/2"},
+            ],
+        )
 
         class FakeDL:
             def __init__(self, *a, **k):
@@ -214,17 +217,26 @@ class TestBatchPreview:
 
             def get_info(self, url):
                 last = url.rsplit("/", 1)[-1]
-                return {"id": last, "title": "t" + last,
-                        "duration": 10 if last == "1" else 0}
+                return {
+                    "id": last,
+                    "title": "t" + last,
+                    "duration": 10 if last == "1" else 0,
+                }
 
             def download(self, url):
                 raise AssertionError("must not download")
 
         monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
-        rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner", "--dry-run",
-            "-o", str(tmp_path), "--no-proxy",
-        ])
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "--dry-run",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         assert "  1. [video]" in out and "  2. [photo]" in out
@@ -233,10 +245,13 @@ class TestBatchPreview:
     def test_batch_downloads_each_item(self, monkeypatch, tmp_path, capsys):
         import jackthesolo.cli as cli_mod
 
-        self._flat_ydl(monkeypatch, [
-            {"id": "1", "url": "https://www.tiktok.com/@u/video/1"},
-            {"id": "nou"},
-        ])
+        self._flat_ydl(
+            monkeypatch,
+            [
+                {"id": "1", "url": "https://www.tiktok.com/@u/video/1"},
+                {"id": "nou"},
+            ],
+        )
         monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: None)
 
         class FakeDL:
@@ -250,10 +265,15 @@ class TestBatchPreview:
                 return [url + ".mp4"]
 
         monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
-        rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner",
-            "-o", str(tmp_path), "--no-proxy",
-        ])
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         assert "[1/2]" in out and "skip (no URL" in out
@@ -287,10 +307,15 @@ class TestBatchPreview:
                 return dict(extra or {})
 
         monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
-        rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner",
-            "-o", str(tmp_path), "--no-proxy",
-        ])
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
+        )
         assert rc == 1
         assert "batch list failed" in capsys.readouterr().err
 
@@ -314,9 +339,50 @@ class TestBatchConfirm:
 
         monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
         monkeypatch.setattr(
-            cli_mod, "_flat_entries", lambda dl, url: [{"id": "1", "url": "https://x/y"}]
+            cli_mod,
+            "_flat_entries",
+            lambda dl, url: [{"id": "1", "url": "https://x/y"}],
         )
         return cli_mod
+
+    def test_confirm_shows_size_estimate(self, monkeypatch, tmp_path, capsys):
+        import sys
+
+        import jackthesolo.cli as cli_mod
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        monkeypatch.setattr(
+            cli_mod,
+            "_flat_entries",
+            lambda dl, url: [{"id": "1", "title": "a", "filesize_approx": 2048}],
+        )
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(sys, "stdin", Tty())
+        monkeypatch.setattr("builtins.input", lambda *a, **k: "n")
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
+        )
+        assert rc == 2
+        out = capsys.readouterr().out
+        assert "est. total ~2.0 KB" in out
+        assert "Cancelled." in out  # prompt itself goes to mocked input()
 
     def test_decline_cancels(self, monkeypatch, tmp_path, capsys):
         import sys
@@ -329,22 +395,31 @@ class TestBatchConfirm:
                 return True
 
         monkeypatch.setattr(sys, "stdin", Tty())
-        rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner",
-            "-o", str(tmp_path), "--no-proxy",
-        ])
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
+        )
         assert rc == 2
         assert "Cancelled." in capsys.readouterr().out
 
     def test_yes_skips_confirm(self, monkeypatch, tmp_path, capsys):
         cli_mod = self._ns(monkeypatch, tmp_path)
-        monkeypatch.setattr(
-            cli_mod, "_tiktok_single", lambda *a, **k: ["f.mp4"]
+        monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: ["f.mp4"])
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "--yes",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
         )
-        rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner", "--yes",
-            "-o", str(tmp_path), "--no-proxy",
-        ])
         assert rc == 0
         assert "total 1 file(s)" in capsys.readouterr().out
 
@@ -354,7 +429,9 @@ class TestBatchFolder:
         from jackthesolo.cli import _batch_username
 
         assert _batch_username("https://www.tiktok.com/@someuser") == "someuser"
-        assert _batch_username("https://www.tiktok.com/@we-ird.name_1") == "we-ird.name_1"
+        assert (
+            _batch_username("https://www.tiktok.com/@we-ird.name_1") == "we-ird.name_1"
+        )
         assert _batch_username("https://example.com/x") == "batch"
 
     def test_preview_before_confirm_and_subfolder(self, monkeypatch, tmp_path, capsys):
@@ -369,14 +446,21 @@ class TestBatchFolder:
 
         monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
         monkeypatch.setattr(
-            cli_mod, "_flat_entries",
+            cli_mod,
+            "_flat_entries",
             lambda dl, url: [{"id": "9", "title": "hello", "url": "https://x/y"}],
         )
         monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: ["f.mp4"])
-        rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner", "--yes",
-            "-o", str(tmp_path), "--no-proxy",
-        ])
+        rc = cli_mod.main(
+            [
+                "https://www.tiktok.com/@u",
+                "--no-banner",
+                "--yes",
+                "-o",
+                str(tmp_path),
+                "--no-proxy",
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         assert "batch folder:" in out and str(tmp_path / "u") in out

@@ -321,7 +321,7 @@ def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None, output_di
 
 def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
     """Batch into username/ folder: preview list first, confirm, then download."""
-    from .progress import BatchView, Spinner
+    from .progress import BatchView, Spinner, fmt_bytes
 
     user = _batch_username(url)
     out_dir = Path(args.output) / user
@@ -348,9 +348,15 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
     for i, e in enumerate(entries, 1):
         title = e.get("title") or e.get("id") or "?"
         print(f"  {i}. {title} ({e.get('id')})")
+    sizes = [e.get("filesize") or e.get("filesize_approx") or 0 for e in entries]
+    sized = sum(1 for s in sizes if s > 0)
+    est = f"est. total ~{fmt_bytes(sum(sizes))}" if sized else "total size unknown"
+    if sized < len(entries):
+        est += f" (from {sized}/{len(entries)} items with size info)"
+    print(f"[jackthesolo] {est}")
     if not args.dry_run and not args.yes and sys.stdin.isatty():
         try:
-            ans = input(f"Continue to download {len(entries)} item(s)? [Y/n]: ")
+            ans = input(f"Continue to download {len(entries)} item(s) [{est}]? [Y/n]: ")
         except (EOFError, KeyboardInterrupt):
             print("\nCancelled.")
             return 2
