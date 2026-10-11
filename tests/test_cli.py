@@ -217,11 +217,17 @@ class TestBatchPreview:
 
             def get_info(self, url):
                 last = url.rsplit("/", 1)[-1]
-                return {
+                info = {
                     "id": last,
                     "title": "t" + last,
                     "duration": 10 if last == "1" else 0,
                 }
+                if last == "1":
+                    info["formats"] = [
+                        {"vcodec": "h264", "filesize": 2048},
+                        {"vcodec": "none"},
+                    ]
+                return info
 
             def download(self, url):
                 raise AssertionError("must not download")
@@ -241,6 +247,7 @@ class TestBatchPreview:
         out = capsys.readouterr().out
         assert "  1. [video]" in out and "  2. [photo]" in out
         assert "1 video, 1 photo" in out
+        assert "est. total ~2.0 KB (from 1/2 items with size info)" in out
 
     def test_batch_downloads_each_item(self, monkeypatch, tmp_path, capsys):
         import jackthesolo.cli as cli_mod
