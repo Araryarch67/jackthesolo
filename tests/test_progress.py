@@ -71,3 +71,33 @@ class TestRate:
         r = Rate(clock=lambda: t[0])
         t[0] = 4.0
         assert r.avg(2048) == 512.0
+
+
+class TestBatchView:
+    def test_disabled_prints(self, capsys):
+        from jackthesolo.progress import BatchView
+
+        v = BatchView(enabled=False)
+        i = v.add("a ... waiting")
+        assert i == 0
+        v.set(0, "a done")
+        v.freeze()
+        out = capsys.readouterr().out
+        assert "a ... waiting" in out and "a done" in out
+
+    def test_enabled_cursor(self, capsys):
+        from jackthesolo.progress import BatchView
+
+        v = BatchView(enabled=True)
+        v.add("row1")
+        v.set(0, "row1 done")
+        out = capsys.readouterr().out
+        assert "row1 done" in out and "\x1b[1A" in out
+
+    def test_truncates_wide(self, capsys):
+        from jackthesolo.progress import BatchView
+
+        v = BatchView(enabled=False)
+        v.width = 20
+        v.add("x" * 100)
+        assert len(capsys.readouterr().out.strip()) <= 100

@@ -110,3 +110,51 @@ class Spinner:
         if final:
             print(final)
         sys.stdout.flush()
+
+
+class BatchView:
+    """Pacman-style batch list: one live row per item.
+
+    On a tty, rows redraw in place with cursor control. Any outside print
+    (engine logs, errors) breaks cursor math, so call freeze() before such
+    output; the next set() redraws the block fresh below. Non-tty prints
+    plain status lines instead.
+    """
+
+    def __init__(self, enabled: bool | None = None) -> None:
+        import shutil
+
+        self.enabled = sys.stdout.isatty() if enabled is None else enabled
+        self.rows: list[str] = []
+        self._drawn = 0
+        try:
+            self.width = shutil.get_terminal_width((80, 20)).columns
+        except Exception:  # noqa: BLE001
+            self.width = 80
+
+    def _render(self) -> None:
+        if self._drawn:
+            sys.stdout.write(f"\033[{self._drawn}A")
+        for row in self.rows:
+            sys.stdout.write("\r\033[K" + row[: max(10, self.width - 1)] + "\n")
+        self._drawn = len(self.rows)
+        sys.stdout.flush()
+
+    def add(self, text: str) -> int:
+        self.rows.append(text)
+        if self.enabled:
+            self._render()
+        else:
+            print(text)
+        return len(self.rows) - 1
+
+    def set(self, idx: int, text: str) -> None:
+        self.rows[idx] = text
+        if self.enabled:
+            self._render()
+        else:
+            print(text)
+
+    def freeze(self) -> None:
+        """Forget cursor position; next set() redraws the block fresh."""
+        self._drawn = 0

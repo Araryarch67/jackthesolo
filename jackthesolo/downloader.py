@@ -197,29 +197,43 @@ class JackDownloader:
         host = url.lower()
         return "youtube.com" in host or "youtu.be" in host
 
-    def download(self, url: str | list[str], **overrides: Any) -> list[str]:
+    def download(
+        self, url: str | list[str], view=None, view_idx: int = 0, **overrides: Any
+    ) -> list[str]:
         urls = [url] if isinstance(url, str) else list(url)
         downloaded: list[str] = []
         _prep: list[Spinner] = [Spinner()]
 
+        def _row(text: str) -> None:
+            if view is not None:
+                view.set(view_idx, text)
+
         def _hook(d: dict[str, Any]) -> None:
             if d.get("status") == "finished":
-                _prep[0].stop()
                 f = d.get("filename", "")
                 if f:
                     downloaded.append(f)
-                    print(f"[jackthesolo] done: {f}")
+                if view is not None:
+                    _row(f"done: {f or 'download'}")
+                else:
+                    _prep[0].stop()
+                    if f:
+                        print(f"[jackthesolo] done: {f}")
             elif d.get("status") == "downloading":
-                _prep[0].stop()
                 total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
                 done = d.get("downloaded_bytes", 0)
                 speed = (d.get("_speed_str") or "").strip()
                 eta = (d.get("_eta_str") or "").strip()
                 tail = f"@ {speed} ETA {eta}" if speed else ""
                 if total:
-                    sys.stdout.write(f"\r{bar(done, total)} {tail}".rstrip())
+                    line = f"{bar(done, total)} {tail}".rstrip()
                 else:
-                    sys.stdout.write(f"\r… {done / 1024 / 1024:.1f} MB {tail}".rstrip())
+                    line = f"… {done / 1024 / 1024:.1f} MB {tail}".rstrip()
+                if view is not None:
+                    _row(line)
+                    return
+                _prep[0].stop()
+                sys.stdout.write(f"\r{line}")
                 sys.stdout.flush()
 
         def _run(extra: dict[str, Any] | None = None) -> None:
@@ -231,11 +245,13 @@ class JackDownloader:
                 opts.update(overrides)
             if extra:
                 opts.update(extra)
-            _prep[0] = Spinner().start("preparing download...")
+            if view is None:
+                _prep[0] = Spinner().start("preparing download...")
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     for u in urls:
-                        print(f"[jackthesolo] download: {sanitize_url(u)}")
+                        if view is None:
+                            print(f"[jackthesolo] download: {sanitize_url(u)}")
                         try:
                             ydl.download([u])
                         except yt_dlp.utils.MaxDownloadsReached:
@@ -244,8 +260,9 @@ class JackDownloader:
                             )
                             break
             finally:
-                _prep[0].stop()
-                print()
+                if view is None:
+                    _prep[0].stop()
+                    print()
 
         winner = self._pick_client(urls, overrides)
         base = (

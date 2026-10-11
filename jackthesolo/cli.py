@@ -69,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="max batch items (profile/playlist), e.g. --max 5",
     )
     p.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="skip batch download confirmation",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="list batch items only, no downloading",
@@ -244,6 +250,7 @@ def collect_wizard_argv(ask=input, default_url: str | None = None) -> list[str] 
     if (ask("Run? [Y/n]: ") or "").strip().lower() in ("n", "no"):
         print("Cancelled.")
         return None
+    argv.append("--yes")
     return argv
 
 
@@ -320,36 +327,57 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
         f"[jackthesolo] batch: {len(entries)} item(s)"
         + (" (dry run)" if args.dry_run else "")
     )
+    if not args.dry_run and not args.yes and sys.stdin.isatty():
+        try:
+            ans = input(f"Continue to download {len(entries)} item(s)? [Y/n]: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return 2
+        if ans.strip().lower() in ("n", "no"):
+            print("Cancelled.")
+            return 2
+    from .progress import BatchView
+
+    view = BatchView()
     files_all: list = []
     videos = photos = 0
     for i, e in enumerate(entries, 1):
         item_url = _entry_url(e)
         if not item_url:
-            print(f"  {i}. skip (no URL for id {e.get('id')})")
+            view.add(f"  {i}. skip (no URL for id {e.get('id')})")
             continue
         if args.dry_run:
             try:
                 info = dl.get_info(item_url)
             except Exception:  # noqa: BLE001
-                print(f"  {i}. [?] {item_url}")
+                view.add(f"  {i}. [?] {item_url}")
                 continue
             kind = "video" if (info.get("duration") or 0) > 0 else "photo"
             videos += kind == "video"
             photos += kind == "photo"
-            print(f"  {i}. [{kind}] {info.get('title')} ({info.get('id')})")
+            view.add(f"  {i}. [{kind}] {info.get('title')} ({info.get('id')})")
             continue
-        print(f"[{i}/{len(entries)}] {sanitize_url(item_url)}", flush=True)
+        label = sanitize_url(item_url)
+        if len(label) > 70:
+            label = label[:67] + "..."
+        idx = view.add(f"[{i}/{len(entries)}] {label} ... waiting")
+        view.freeze()
         got = _tiktok_single(args, item_url, cookies, anon_ua)
         if got is None:
             try:
-                got = dl.download(item_url)
+                got = dl.download(item_url, view=view, view_idx=idx)
             except Exception as e2:  # noqa: BLE001
+                view.freeze()
                 print(
                     f"  item failed ({type(e2).__name__}), continuing...",
                     file=sys.stderr,
                 )
+                view.set(idx, f"[{i}/{len(entries)}] FAILED")
                 continue
+        else:
+            view.set(idx, f"[{i}/{len(entries)}] done: {len(got)} file(s)")
         files_all += got or []
+    view.freeze()
     if args.dry_run:
         print(
             f"[jackthesolo] found {len(entries)} item(s): {videos} video, {photos} photo"

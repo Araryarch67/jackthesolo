@@ -246,7 +246,7 @@ class TestBatchPreview:
             def _ydl_opts(self, extra=None):
                 return dict(extra or {})
 
-            def download(self, url):
+            def download(self, url, **kwargs):
                 return [url + ".mp4"]
 
         monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
@@ -299,3 +299,51 @@ class TestBatchPreview:
 
         assert _entry_url({"url": "https://x/y"}) == "https://x/y"
         assert _entry_url({"id": "1"}) is None
+
+
+class TestBatchConfirm:
+    def _ns(self, monkeypatch, tmp_path):
+        import jackthesolo.cli as cli_mod
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        monkeypatch.setattr(
+            cli_mod, "_flat_entries", lambda dl, url: [{"id": "1", "url": "https://x/y"}]
+        )
+        return cli_mod
+
+    def test_decline_cancels(self, monkeypatch, tmp_path, capsys):
+        import sys
+
+        cli_mod = self._ns(monkeypatch, tmp_path)
+        monkeypatch.setattr("builtins.input", lambda *a, **k: "n")
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(sys, "stdin", Tty())
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 2
+        assert "Cancelled." in capsys.readouterr().out
+
+    def test_yes_skips_confirm(self, monkeypatch, tmp_path, capsys):
+        cli_mod = self._ns(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            cli_mod, "_tiktok_single", lambda *a, **k: ["f.mp4"]
+        )
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--yes",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
+        assert "total 1 file(s)" in capsys.readouterr().out
