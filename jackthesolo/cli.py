@@ -323,6 +323,14 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
     """Batch into username/ folder: preview list first, confirm, then download."""
     from .progress import BatchView, Spinner, fmt_bytes
 
+    def _best_size(info: dict) -> int:
+        sizes = [
+            f.get("filesize") or f.get("filesize_approx") or 0
+            for f in info.get("formats") or []
+            if (f.get("vcodec") or "none") != "none"
+        ]
+        return max(sizes, default=0)
+
     user = _batch_username(url)
     out_dir = Path(args.output) / user
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -380,6 +388,8 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
     view = BatchView()
     files_all: list = []
     videos = photos = 0
+    sized_bytes = 0
+    sized_items = 0
     for i, e in enumerate(entries, 1):
         item_url = _entry_url(e)
         if not item_url:
@@ -394,7 +404,12 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
             kind = "video" if (info.get("duration") or 0) > 0 else "photo"
             videos += kind == "video"
             photos += kind == "photo"
-            view.add(f"  {i}. [{kind}] {info.get('title')} ({info.get('id')})")
+            best = _best_size(info)
+            if best:
+                sized_bytes += best
+                sized_items += 1
+            extra = f" ~{fmt_bytes(best)}" if best else ""
+            view.add(f"  {i}. [{kind}] {info.get('title')} ({info.get('id')}){extra}")
             continue
         label = sanitize_url(item_url)
         if len(label) > 70:
@@ -423,6 +438,11 @@ def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
         print(
             f"[jackthesolo] found {len(entries)} item(s): {videos} video, {photos} photo"
         )
+        if sized_items:
+            print(
+                f"[jackthesolo] est. total ~{fmt_bytes(sized_bytes)} "
+                f"(from {sized_items}/{len(entries)} items with size info)"
+            )
     else:
         print(f"[jackthesolo] total {len(files_all)} file(s) -> {out_dir}/")
     return 0
