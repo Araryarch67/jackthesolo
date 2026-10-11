@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .downloader import SUPPORTED_HINT, JackDownloader
 from .filedownloader import download_file
-from .privacy import resolve_proxy, sanitize_text
+from .privacy import resolve_proxy, sanitize_text, sanitize_url
 from .sources import detect_source
 
 
@@ -261,39 +261,102 @@ def run_wizard(default_url: str | None = None) -> int:
     return main(argv)
 
 
-def _preview_batch(dl, url: str) -> int | None:
-    """List batch items first: titles + video/photo counts. None on failure."""
+def _flat_entries(dl, url: str) -> list:
+    """Fast ID-level enumeration for batch mode (flat, no per-item fetch)."""
     import yt_dlp
 
-    print("[jackthesolo] listing batch items first...")
-    try:
-        opts = dl._ydl_opts(
-            {"quiet": True, "skip_download": True, "extract_flat": True}
-        )
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:  # noqa: BLE001
-        print(f"[jackthesolo] preview failed ({type(e).__name__}), downloading blind.")
+    opts = dl._ydl_opts({"quiet": True, "skip_download": True, "extract_flat": True})
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return info.get("entries") or []
+
+
+def _entry_url(e: dict) -> str | None:
+    u = e.get("url") or ""
+    return u if u.startswith("http") else None
+
+
+def _tiktok_single(args, url: str, cookies, anon_ua, output_file=None):
+    """Subsripper engine for one item. Returns files, None on failure."""
+    from .tiktok import download_tiktok, is_tiktok_detail_url
+
+    if not (is_tiktok_detail_url(url) and not (args.info or args.list_formats)):
         return None
-    entries = info.get("entries") or []
-    if not entries:
-        print("[jackthesolo] preview empty, downloading anyway.")
-        return 0
-    has_dur = any((e.get("duration") or 0) > 0 for e in entries)
-    videos = sum(1 for e in entries if (e.get("duration") or 0) > 0)
-    for i, e in enumerate(entries, 1):
-        title = e.get("title") or e.get("id") or "?"
-        kind = ""
-        if has_dur:
-            kind = " [video]" if (e.get("duration") or 0) > 0 else " [photo]"
-        print(f"  {i:3d}.{kind} {title} ({e.get('id')})")
-    if has_dur:
+    try:
+        eff = resolve_proxy(args.proxy, args.tor, no_proxy=args.no_proxy)
+        return download_tiktok(
+            url,
+            cookies_file=cookies,
+            output_dir=args.output,
+            output_file=output_file,
+            proxy=eff,
+            user_agent=args.user_agent,
+            random_ua=anon_ua,
+            allow_direct_fallback=args.no_proxy,
+        )
+    except Exception as e:  # noqa: BLE001
         print(
-            f"[jackthesolo] found {len(entries)} items: {videos} video, {len(entries) - videos} photo"
+            f"[jackthesolo] tiktok failed ({type(e).__name__}), falling back to yt-dlp...",
+            file=sys.stderr,
+        )
+        if args.verbose:
+            print(f"detail: {sanitize_text(e)}", file=sys.stderr)
+        return None
+
+
+def _run_batch(args, dl, url: str, cookies, anon_ua) -> int:
+    """Streaming batch: list items one by one, download each via best engine."""
+    try:
+        entries = _flat_entries(dl, url)
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"[jackthesolo] batch list failed ({type(e).__name__}), aborting.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.max:
+        entries = entries[: args.max]
+    print(
+        f"[jackthesolo] batch: {len(entries)} item(s)"
+        + (" (dry run)" if args.dry_run else "")
+    )
+    files_all: list = []
+    videos = photos = 0
+    for i, e in enumerate(entries, 1):
+        item_url = _entry_url(e)
+        if not item_url:
+            print(f"  {i}. skip (no URL for id {e.get('id')})")
+            continue
+        if args.dry_run:
+            try:
+                info = dl.get_info(item_url)
+            except Exception:  # noqa: BLE001
+                print(f"  {i}. [?] {item_url}")
+                continue
+            kind = "video" if (info.get("duration") or 0) > 0 else "photo"
+            videos += kind == "video"
+            photos += kind == "photo"
+            print(f"  {i}. [{kind}] {info.get('title')} ({info.get('id')})")
+            continue
+        print(f"[{i}/{len(entries)}] {sanitize_url(item_url)}", flush=True)
+        got = _tiktok_single(args, item_url, cookies, anon_ua)
+        if got is None:
+            try:
+                got = dl.download(item_url)
+            except Exception as e2:  # noqa: BLE001
+                print(
+                    f"  item failed ({type(e2).__name__}), continuing...",
+                    file=sys.stderr,
+                )
+                continue
+        files_all += got or []
+    if args.dry_run:
+        print(
+            f"[jackthesolo] found {len(entries)} item(s): {videos} video, {photos} photo"
         )
     else:
-        print(f"[jackthesolo] found {len(entries)} items")
-    return len(entries)
+        print(f"[jackthesolo] total {len(files_all)} file(s) -> {args.output}/")
+    return 0
 
 
 def _enforce_paranoid(args: argparse.Namespace, mode: str) -> int:
@@ -530,27 +593,12 @@ def main(argv: list[str] | None = None) -> int:
     tiktok_tried = False
     if is_tiktok_detail_url(url) and not (args.info or args.list_formats):
         tiktok_tried = True
-        try:
-            eff = resolve_proxy(args.proxy, args.tor, no_proxy=args.no_proxy)
-            files = download_tiktok(
-                url,
-                cookies_file=cookies,
-                output_dir=args.output,
-                output_file=args.output_file,
-                proxy=eff,
-                user_agent=args.user_agent,
-                random_ua=anon_ua,
-                allow_direct_fallback=args.no_proxy,
-            )
+        files = _tiktok_single(
+            args, url, cookies, anon_ua, output_file=args.output_file
+        )
+        if files is not None:
             print(f"[jackthesolo] total {len(files)} file(s) -> {args.output}/")
             return 0
-        except Exception as e:  # noqa: BLE001
-            print(
-                f"[jackthesolo] tiktok failed ({type(e).__name__}), falling back to yt-dlp...",
-                file=sys.stderr,
-            )
-            if args.verbose:
-                print(f"detail: {sanitize_text(e)}", file=sys.stderr)
 
     batch_profile = is_tiktok_profile_url(url)
     if batch_profile and not args.allow_playlist:
@@ -586,9 +634,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             return 0
         if batch_profile:
-            _preview_batch(dl, url)
-            if args.dry_run:
-                return 0
+            return _run_batch(args, dl, url, cookies, anon_ua)
         files = dl.download(url)
         print(f"[jackthesolo] total {len(files)} file(s) -> {args.output}/")
         return 0

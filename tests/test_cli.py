@@ -179,11 +179,8 @@ class TestWizard:
 
 
 class TestBatchPreview:
-    def test_preview_lists_and_counts(self, monkeypatch, tmp_path, capsys):
+    def _flat_ydl(self, monkeypatch, entries):
         import yt_dlp
-
-        from jackthesolo.cli import _preview_batch
-        from jackthesolo.downloader import JackDownloader
 
         class FakeYDL:
             def __init__(self, opts):
@@ -196,19 +193,76 @@ class TestBatchPreview:
                 return False
 
             def extract_info(self, url, download=False):
-                return {"entries": [
-                    {"id": "1", "title": "vid", "duration": 10},
-                    {"id": "2", "title": "pic"},
-                ]}
+                return {"entries": entries}
 
         monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
-        dl = JackDownloader(output_dir=tmp_path, no_proxy=True)
-        assert _preview_batch(dl, "https://www.tiktok.com/@u") == 2
+
+    def test_dry_run_streams_items(self, monkeypatch, tmp_path, capsys):
+        import jackthesolo.cli as cli_mod
+
+        self._flat_ydl(monkeypatch, [
+            {"id": "1", "url": "https://www.tiktok.com/@u/video/1"},
+            {"id": "2", "url": "https://www.tiktok.com/@u/video/2"},
+        ])
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+            def get_info(self, url):
+                last = url.rsplit("/", 1)[-1]
+                return {"id": last, "title": "t" + last,
+                        "duration": 10 if last == "1" else 0}
+
+            def download(self, url):
+                raise AssertionError("must not download")
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--dry-run",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
         out = capsys.readouterr().out
+        assert "  1. [video]" in out and "  2. [photo]" in out
         assert "1 video, 1 photo" in out
 
-    def test_preview_failure_returns_none(self, monkeypatch, tmp_path, capsys):
+    def test_batch_downloads_each_item(self, monkeypatch, tmp_path, capsys):
+        import jackthesolo.cli as cli_mod
+
+        self._flat_ydl(monkeypatch, [
+            {"id": "1", "url": "https://www.tiktok.com/@u/video/1"},
+            {"id": "nou"},
+        ])
+        monkeypatch.setattr(cli_mod, "_tiktok_single", lambda *a, **k: None)
+
+        class FakeDL:
+            def __init__(self, *a, **k):
+                pass
+
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
+
+            def download(self, url):
+                return [url + ".mp4"]
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "[1/2]" in out and "skip (no URL" in out
+        assert "total 1 file(s)" in out
+
+    def test_flat_failure_aborts(self, monkeypatch, tmp_path, capsys):
         import yt_dlp
+
+        import jackthesolo.cli as cli_mod
 
         class FakeYDL:
             def __init__(self, opts):
@@ -224,27 +278,24 @@ class TestBatchPreview:
                 raise RuntimeError("net down")
 
         monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
-        from jackthesolo.cli import _preview_batch
-        from jackthesolo.downloader import JackDownloader
 
-        dl = JackDownloader(output_dir=tmp_path, no_proxy=True)
-        assert _preview_batch(dl, "https://www.tiktok.com/@u") is None
-
-    def test_dry_run_skips_download(self, monkeypatch, tmp_path):
-        import jackthesolo.cli as cli_mod
-
-        monkeypatch.setattr(cli_mod, "_preview_batch", lambda dl, url: 3)
-
-        class NoDownload:
+        class FakeDL:
             def __init__(self, *a, **k):
                 pass
 
-            def download(self, url):
-                raise AssertionError("must not download")
+            def _ydl_opts(self, extra=None):
+                return dict(extra or {})
 
-        monkeypatch.setattr(cli_mod, "JackDownloader", NoDownload)
+        monkeypatch.setattr(cli_mod, "JackDownloader", FakeDL)
         rc = cli_mod.main([
-            "https://www.tiktok.com/@u", "--no-banner", "--dry-run",
+            "https://www.tiktok.com/@u", "--no-banner",
             "-o", str(tmp_path), "--no-proxy",
         ])
-        assert rc == 0
+        assert rc == 1
+        assert "batch list failed" in capsys.readouterr().err
+
+    def test_entry_url_helper(self):
+        from jackthesolo.cli import _entry_url
+
+        assert _entry_url({"url": "https://x/y"}) == "https://x/y"
+        assert _entry_url({"id": "1"}) is None
