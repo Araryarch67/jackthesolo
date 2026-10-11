@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="max batch items (profile/playlist), e.g. --max 5",
     )
     p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list batch items only, no downloading",
+    )
+    p.add_argument(
         "--cookies",
         default=None,
         help="path to YOUR cookies.txt (required for login content)",
@@ -254,6 +259,41 @@ def run_wizard(default_url: str | None = None) -> int:
     if argv is None:
         return 2
     return main(argv)
+
+
+def _preview_batch(dl, url: str) -> int | None:
+    """List batch items first: titles + video/photo counts. None on failure."""
+    import yt_dlp
+
+    print("[jackthesolo] listing batch items first...")
+    try:
+        opts = dl._ydl_opts(
+            {"quiet": True, "skip_download": True, "extract_flat": True}
+        )
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:  # noqa: BLE001
+        print(f"[jackthesolo] preview failed ({type(e).__name__}), downloading blind.")
+        return None
+    entries = info.get("entries") or []
+    if not entries:
+        print("[jackthesolo] preview empty, downloading anyway.")
+        return 0
+    has_dur = any((e.get("duration") or 0) > 0 for e in entries)
+    videos = sum(1 for e in entries if (e.get("duration") or 0) > 0)
+    for i, e in enumerate(entries, 1):
+        title = e.get("title") or e.get("id") or "?"
+        kind = ""
+        if has_dur:
+            kind = " [video]" if (e.get("duration") or 0) > 0 else " [photo]"
+        print(f"  {i:3d}.{kind} {title} ({e.get('id')})")
+    if has_dur:
+        print(
+            f"[jackthesolo] found {len(entries)} items: {videos} video, {len(entries) - videos} photo"
+        )
+    else:
+        print(f"[jackthesolo] found {len(entries)} items")
+    return len(entries)
 
 
 def _enforce_paranoid(args: argparse.Namespace, mode: str) -> int:
@@ -545,6 +585,10 @@ def main(argv: list[str] | None = None) -> int:
                     f"{f.get('format_id'):10} {str(f.get('ext')):6} {str(f.get('resolution') or f.get('format_note') or ''):15} {f.get('filesize_approx') or ''}"
                 )
             return 0
+        if batch_profile:
+            _preview_batch(dl, url)
+            if args.dry_run:
+                return 0
         files = dl.download(url)
         print(f"[jackthesolo] total {len(files)} file(s) -> {args.output}/")
         return 0

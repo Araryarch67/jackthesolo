@@ -176,3 +176,75 @@ class TestWizard:
             assert run_wizard() == 2
         finally:
             cli_mod.collect_wizard_argv = orig
+
+
+class TestBatchPreview:
+    def test_preview_lists_and_counts(self, monkeypatch, tmp_path, capsys):
+        import yt_dlp
+
+        from jackthesolo.cli import _preview_batch
+        from jackthesolo.downloader import JackDownloader
+
+        class FakeYDL:
+            def __init__(self, opts):
+                assert opts.get("extract_flat") is True
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def extract_info(self, url, download=False):
+                return {"entries": [
+                    {"id": "1", "title": "vid", "duration": 10},
+                    {"id": "2", "title": "pic"},
+                ]}
+
+        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+        dl = JackDownloader(output_dir=tmp_path, no_proxy=True)
+        assert _preview_batch(dl, "https://www.tiktok.com/@u") == 2
+        out = capsys.readouterr().out
+        assert "1 video, 1 photo" in out
+
+    def test_preview_failure_returns_none(self, monkeypatch, tmp_path, capsys):
+        import yt_dlp
+
+        class FakeYDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def extract_info(self, url, download=False):
+                raise RuntimeError("net down")
+
+        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+        from jackthesolo.cli import _preview_batch
+        from jackthesolo.downloader import JackDownloader
+
+        dl = JackDownloader(output_dir=tmp_path, no_proxy=True)
+        assert _preview_batch(dl, "https://www.tiktok.com/@u") is None
+
+    def test_dry_run_skips_download(self, monkeypatch, tmp_path):
+        import jackthesolo.cli as cli_mod
+
+        monkeypatch.setattr(cli_mod, "_preview_batch", lambda dl, url: 3)
+
+        class NoDownload:
+            def __init__(self, *a, **k):
+                pass
+
+            def download(self, url):
+                raise AssertionError("must not download")
+
+        monkeypatch.setattr(cli_mod, "JackDownloader", NoDownload)
+        rc = cli_mod.main([
+            "https://www.tiktok.com/@u", "--no-banner", "--dry-run",
+            "-o", str(tmp_path), "--no-proxy",
+        ])
+        assert rc == 0
